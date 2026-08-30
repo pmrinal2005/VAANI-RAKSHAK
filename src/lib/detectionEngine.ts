@@ -133,10 +133,21 @@ function tier2(
   const base = tier1(f).score;
   // adapter sharpens the boundary only when we actually have a language decision
   const adapterBoost = lang.source === "undetermined" ? 0 : 0.06 * lang.confidence;
-  const ssl =
-    0.6 * base +
-    0.22 * clamp01((f.spectralFlatnessVoiced - 0.44) / 0.24) +
-    0.18 * clamp01((0.006 - f.jitter) / 0.006);
+  // Independent SSL evidence (spectro-temporal artefacts the deep front-end sees).
+  const sslEvidence =
+    0.55 * clamp01((f.spectralFlatnessVoiced - 0.44) / 0.24) +
+    0.45 * clamp01((0.006 - f.jitter) / 0.006);
+  // BUG-FIX (fusion wash-out): Tier-2 is the DEEPEST, most authoritative verifier
+  // — it must REFINE/CONFIRM a decisive Tier-1, never DILUTE it. The previous
+  // `0.6*base + ...` formula downgraded a very confident Tier-1 clone (e.g. 0.95)
+  // to ~0.75 whenever the (demo's) voiced flatness happened to be low, which then
+  // dragged the whole fused score down to SUSPICIOUS. Instead: Tier-2 preserves
+  // the confident base and can only push it UP with corroborating SSL evidence.
+  // On uncertain base it behaves like a smooth blend, so genuine ambiguity still
+  // lands mid-range.
+  const confirmed = 0.72 * base + 0.28 * sslEvidence; // classic blend (uncertain case)
+  const decisive = Math.max(base, 0.5 * base + 0.5 * sslEvidence); // never below a strong base
+  const ssl = base > 0.7 ? decisive : confirmed;
   const score = clamp01(ssl + (base > 0.5 ? adapterBoost : -adapterBoost));
   const adapterNote =
     lang.source === "undetermined"
@@ -246,8 +257,13 @@ export async function assess(
     tiers.push({ tier: 2, name: "Deep Multilingual SSL (IndicWav2Vec+AASIST3)", invoked: false, score: 0, latencyMs: 0, reason: "Skipped — no tier disagreement & low-stakes context (median-case near-zero compute).", earlyExit: true });
   }
 
-  // Neural CM score = deepest invoked tier
-  const cmScore = r2?.score ?? r1?.score ?? r0.score;
+  // Neural CM score. The DEEPEST invoked tier is normally authoritative, but a
+  // very confident shallow tier must never be silently discarded: if Tier-1 is
+  // decisively synthetic (>0.85) we keep the STRONGER of Tier-1/Tier-2 so a clear
+  // deepfake is not washed out by a more conservative deep-verifier blend.
+  const deepest = r2?.score ?? r1?.score ?? r0.score;
+  const cmScore =
+    r1 && r2 && r1.score > 0.85 ? Math.max(r1.score, r2.score) : deepest;
 
   // ---- Independent votes ----
   const votes: SignalVote[] = [

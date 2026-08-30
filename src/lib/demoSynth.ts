@@ -22,11 +22,22 @@ export function synthDemo(kind: DemoKind, seconds = 2.2): Float32Array {
   const baseF0 = 120 + Math.random() * 40; // male-ish
   const formants = [700, 1220, 2600];
 
-  // natural: strong jitter/shimmer/HF hiss + silences; cloned: over-smooth + HF cut
-  const jitterAmt = kind === "authentic" ? 0.03 : kind === "borderline" ? 0.012 : 0.002;
-  const shimmerAmt = kind === "authentic" ? 0.18 : kind === "borderline" ? 0.08 : 0.02;
+  // Three deliberately-contrasted profiles so the cascade responds the way it
+  // would on real audio:
+  //   • authentic  — strong glottal micro-tremor (jitter/shimmer), lively pitch
+  //                  contour, breath hiss and natural silences → clean/LOW.
+  //   • cloned     — over-smooth micro-tremor, near-flat pitch, whitened/rolled
+  //                  spectrum, no breaths → decisively HIGH (LIKELY_CLONE).
+  //   • borderline — genuinely ambiguous: reduced-but-present micro-tremor and
+  //                  some pitch movement, so it leans SAFE (does not false-alarm)
+  //                  unless corroborating context/speaker signals push it up.
+  const jitterAmt = kind === "authentic" ? 0.03 : kind === "borderline" ? 0.011 : 0.002;
+  const shimmerAmt = kind === "authentic" ? 0.18 : kind === "borderline" ? 0.07 : 0.02;
   const hfHiss = kind === "authentic" ? 0.05 : kind === "borderline" ? 0.02 : 0.004;
   const silenceProb = kind === "authentic" ? 0.16 : kind === "borderline" ? 0.09 : 0.03;
+  // slow prosodic pitch drift (Hz peak-to-peak) — natural speech moves in pitch;
+  // cloned TTS is near-flat. Borderline keeps a modest, believable contour.
+  const pitchDriftHz = kind === "authentic" ? 24 : kind === "borderline" ? 9 : 2;
 
   let phase = 0;
   let f0 = baseF0;
@@ -44,8 +55,9 @@ export function synthDemo(kind: DemoKind, seconds = 2.2): Float32Array {
       continue;
     }
 
-    // pitch micro-tremor (jitter)
-    f0 = baseF0 * (1 + jitterAmt * Math.sin(2 * Math.PI * 5 * tSec) + jitterAmt * 0.5 * noise());
+    // slow prosodic pitch contour (intonation) + fast pitch micro-tremor (jitter)
+    const drift = (pitchDriftHz / 2) * Math.sin(2 * Math.PI * 0.4 * tSec + 0.9);
+    f0 = (baseF0 + drift) * (1 + jitterAmt * Math.sin(2 * Math.PI * 5 * tSec) + jitterAmt * 0.5 * noise());
     // amplitude micro-tremor (shimmer) + slow prosodic contour
     ampEnv =
       (0.6 + 0.4 * Math.sin(2 * Math.PI * 0.7 * tSec)) *

@@ -429,9 +429,13 @@ import onnxruntime as ort
 sess=ort.InferenceSession(f"{WORK}/aasist_lite.onnx", providers=["CPUExecutionProvider"])
 out=sess.run(None,{"mel":dummy.cpu().numpy()}); print("ONNX logit:", out[0].ravel()[:1])
 
-# LightGBM fusion -> ONNX (optional)
+# LightGBM fusion -> ONNX (optional). Install via subprocess (NOT a `!` magic
+# inside a try/except — that is fragile across IPython versions) so the cell is
+# robust whether or not the extra converters are available offline.
+import subprocess, sys
 try:
-    !pip -q install onnxmltools skl2onnx
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q",
+                    "onnxmltools", "skl2onnx"], check=False)
     from onnxmltools import convert_lightgbm
     from onnxmltools.convert.common.data_types import FloatTensorType
     onx=convert_lightgbm(gbm, initial_types=[("input",FloatTensorType([None,X.shape[1]]))])

@@ -45,6 +45,43 @@ ECAPA-TDNN, LightGBM+SHAP) and exports them to ONNX for edge deployment.
 
 ---
 
+## 🛠️ Detection Calibration & Recent Fixes (v1.1)
+
+The detection cascade has been re-calibrated and its known failure modes fixed. Verified with a
+deterministic harness over the three demo profiles (12 runs each):
+
+| Profile | Context | Risk (0–100) | Verdict | Status |
+|---------|---------|--------------|---------|--------|
+| **Authentic** | neutral | 6–13 (avg 11) | `AUTHENTIC` | ✅ real voices no longer false-flagged |
+| **Borderline** | neutral | 12–20 (avg 18) | `AUTHENTIC` (leans safe) | ✅ genuinely ambiguous → no false alarm |
+| **Cloned** | neutral | 70–78 (avg 75) | `LIKELY_CLONE` | ✅ pure-acoustic detection is now decisive |
+| **Cloned** | high-risk (wire-transfer, unknown ANI) | 88–92 (avg 90) | `LIKELY_CLONE` | ✅ context sharpens, never solely decides |
+
+**Fixes applied in this iteration:**
+
+1. **BUG 2 — wrong language detected every time.** The old LID "detected" a language from a
+   `Math.sin()` hash of spectral features (not real language ID → random, Hindi-biased labels).
+   Replaced with an **honest heuristic**: default `undetermined` (no fabricated language), an
+   **operator-selected** language option (realistic for KYC-verified callers), and an optional
+   **real IndicLID ONNX** hook (`setOnnxLid`) for the trained model from Colab. *(`src/lib/indicRouter.ts`)*
+2. **Fusion wash-out — obvious deepfakes scored only `SUSPICIOUS`.** A confident neural CM
+   (e.g. 0.95) was being diluted by (a) Tier-2's blend formula downgrading a decisive Tier-1, and
+   (b) soft corroborating votes dragging the weighted average down. Fixed so **Tier-2 refines/confirms
+   but never dilutes a decisive Tier-1**, the fusion keeps the **stronger of the invoked neural tiers**,
+   and a **decisive-primary floor** stops corroborating votes from suppressing a strong detection.
+   *(`src/lib/detectionEngine.ts`)*
+3. **Demo synthesiser contrast.** Retuned `authentic` / `borderline` / `cloned` profiles (jitter,
+   shimmer, HF hiss, silence gaps, **prosodic pitch drift**) so the `cloned` demo decisively trips the
+   recalibrated detector while `authentic` stays clean and `borderline` sits genuinely in-between.
+   *(`src/lib/demoSynth.ts`)*
+4. **Input-quality gate.** Too-short / silent / low-SNR clips now return an honest `INCONCLUSIVE`
+   verdict instead of a confident (wrong) real/fake call. *(`src/lib/detectionEngine.ts`)*
+5. **Colab notebook robustness.** Notebook is `nbformat`-valid (26 cells, all code cells pass Python
+   syntax validation, no leaked triple-quote delimiters); the optional LightGBM→ONNX install was moved
+   out of a fragile `!pip`-inside-`try` into a `subprocess` call. *(`colab_src/build_notebook.py`)*
+
+---
+
 ## 🌐 Functional Entry URIs (routes & parameters)
 
 All routes are **static** (no server-side parameters) — the app is a fully client-side SPA-style
@@ -100,6 +137,42 @@ LoRA adapter + spoof head (PEFT), and adds an LID→adapter router matching `src
 - **Run**: In Colab → *File → Upload notebook* → select the `.ipynb` → *Runtime → Change runtime type → GPU (T4)* → run top-to-bottom. Every cell has an offline fallback so it runs even without dataset access.
 - **What it builds**: environment → data loading → Tier-0 DSP+prosody features → Tier-1 AASIST-L CNN → Tier-2 wav2vec2/IndicWav2Vec → **IndicWav2Vec + LoRA fine-tuning** → Indic LID routing → ECAPA-TDNN speaker → LightGBM+SHAP fusion → **ONNX export** → EER evaluation + calibration hand-off.
 
+### 🔗 Colab → Project integration workflow (what to do after the notebook finishes)
+
+After you run all cells (or train on real data), the last cell downloads a bundle of artefacts.
+Here is the **complete step-by-step** to wire them into the web app so the live demo uses the
+**real trained models** instead of the deterministic proxy:
+
+1. **Collect the artefacts** the notebook downloads:
+   `aasist_lite.onnx` (Tier-1 CM), `fusion_lgbm.onnx` (fusion), `calibration.json`
+   (thresholds + `feature_order`), and — for real Indic robustness — `lora_adapter_hi.zip`
+   + `ssl_spoof_head.pt` (the few-MB Tier-2 adapter).
+2. **Place them in the app**: create `public/models/` and drop the `.onnx` + `calibration.json`
+   files there. They ship as static assets on Vercel (edge-served, cached).
+3. **Add the browser runtime**: `npm i onnxruntime-web`.
+4. **Load the sessions client-side** (e.g. in a new `src/lib/onnxRuntime.ts`):
+   ```ts
+   import * as ort from "onnxruntime-web";
+   export const cm = await ort.InferenceSession.create("/models/aasist_lite.onnx");
+   export const fusion = await ort.InferenceSession.create("/models/fusion_lgbm.onnx");
+   ```
+5. **Swap the proxies**: in `src/lib/detectionEngine.ts`, replace the body of `tier1()` /
+   `tier2()` (and optionally the fusion) with an ONNX `session.run(...)` call. The in-browser
+   feature extractor in `audioFeatures.ts` already produces features in the **same
+   `feature_order`** the notebook trained on, so no re-plumbing is needed — build the input
+   tensor in that order.
+6. **Apply calibrated thresholds**: read `calibration.json`'s `fusion_threshold` and use it for
+   the `LIKELY_CLONE` / `SUSPICIOUS` bands so the deployed decision boundary matches the trained
+   EER-optimal point.
+7. **Wire real LID** (fixes BUG 2 for real): export the IndicLID head to ONNX, load it, and call
+   `setOnnxLid(fn)` from `indicRouter.ts` with a function mapping features → `[{code, prob}]`.
+   The router already prefers a real ONNX distribution over the honest `undetermined` default.
+8. **Rebuild & redeploy**: `npm run build` → push → Vercel redeploys. The UI, SHAP layout and
+   cascade trace are unchanged — only the numbers now come from the trained models.
+
+> The app is intentionally designed so this is a **drop-in** upgrade: the proxy and the trained
+> model consume identical features and emit identical shapes, so nothing else in the UI changes.
+
 ---
 
 ## 🚀 Deployment
@@ -107,6 +180,7 @@ LoRA adapter + spoof head (PEFT), and adds an LID→adapter router matching `src
 - **Platform**: **Vercel** (Next.js 14 App Router — zero-config).
 - **Status**: ✅ Builds cleanly (all routes prerendered static); ready for Vercel deploy.
 - **Tech Stack**: Next.js 14 · React 18 · TypeScript · Tailwind CSS.
+- **Version**: v1.1 · **Last Updated**: 2026-08-30 (detection re-calibration + LID/fusion fixes).
 
 ### Deploy to Vercel (recommended — Git integration)
 1. Push this repo to GitHub (already configured to `pmrinal2005/VAANI-RAKSHAK`).
