@@ -1,0 +1,15 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "next build",
+  "installCommand": "npm install",
+  "headers": [
+    {
+      "source": "/notebooks/(.*)",
+      "headers": [
+        { "key": "Content-Type", "value": "application/x-ipynb+json" },
+        { "key": "Cache-Control", "value": "public, max-age=3600" }
+      ]
+    }
+  ]
+}

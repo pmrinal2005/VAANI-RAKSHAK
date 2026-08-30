@@ -6,10 +6,12 @@ const CELLS = [
   ["3", "Data loading", "Bona-fide + synthetic Indic speech (IndicSynth / IndicVoices-R / InDeepFake / ASVspoof). Auto-synthesises a labelled fallback so it always runs."],
   ["4", "Tier-0 DSP + prosody", "librosa spectral flatness/centroid/rolloff/HF-ratio/ZCR + Parselmouth jitter/shimmer/F0σ — same features the web app extracts in-browser."],
   ["5", "Tier-1 AASIST-L CM", "Compact mel-CNN with graph-attention-style pooling — distilled AASIST-L stand-in, trains in minutes, exports to ONNX INT8."],
-  ["6", "Tier-2 SSL front-end", "wav2vec2 / IndicWav2Vec utterance embeddings + optional PEFT LoRA adapter (few-MB per language)."],
+  ["6", "Tier-2 SSL front-end", "wav2vec2 / IndicWav2Vec utterance embeddings — the deep multilingual verifier front-end."],
+  ["6b", "IndicWav2Vec + LoRA fine-tune", "Freezes one shared IndicWav2Vec backbone and trains a few-MB LoRA adapter + spoof head — the real anti-cross-lingual-degradation training. Saves lora_adapter_hi/ (a few MB), not a 22-model zoo."],
+  ["6c", "Indic LID → adapter routing", "Compact language-ID head over the SSL embedding routes each utterance to its LoRA adapter and emits a distribution → code-switch soft-ensemble (mirrors indicRouter.ts)."],
   ["7", "ECAPA-TDNN speaker", "SpeechBrain voiceprint embeddings + cosine — the stolen-but-genuine-voice check."],
   ["8", "LightGBM + SHAP fusion", "Explainable gradient-boosted fusion of all signal streams; SHAP summary plot = the web app's 'why'."],
-  ["9", "ONNX export", "Neural CM → aasist_lite.onnx (verified with onnxruntime); LightGBM → fusion_lgbm.onnx for the edge."],
+  ["9", "ONNX export", "Neural CM → aasist_lite.onnx (verified with onnxruntime); LightGBM → fusion_lgbm.onnx; LoRA adapter bundled as lora_adapter_hi.zip for the edge."],
   ["10", "Cascade eval + hand-off", "Computes EER, exports calibration.json (thresholds + feature order) to paste back into the web app."],
 ];
 

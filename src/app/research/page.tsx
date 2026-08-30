@@ -37,6 +37,19 @@ const OUTCOMES = [
   ["Reusable cross-sector security layer", "Open gRPC/REST APIs, SIP/RTP-native ingest, consortium blockchain shared across banks/telecom/gov."],
 ];
 
+// PART 3 — how each of the 9 gaps is closed by the proposed framework
+const GAP_FIXES = [
+  ["Cross-lingual degradation", "Shared IndicWav2Vec backbone + per-language LoRA adapters, fine-tuned on IndicSynth / IndicVoices-R / InDeepFake — Indic-accented bona-fide + Indic synthetic attacks in training."],
+  ["Emerging generation techniques", "Four independent signal families + federated adapter updates harden the backbone against codec/diffusion/flow-matching TTS without a full retrain."],
+  ["Single point of failure", "DSP, neural CM, prosody biomarkers & speaker-embedding are structurally different votes — an attacker must evade ALL simultaneously."],
+  ["Human factor under pressure", "Mandatory out-of-band second-channel confirmation is enforced as smart-contract code, not a skippable PDF SOP."],
+  ["No streaming risk score", "Cascade emits a continuously-updating, threshold-calibrated 0–100 score mid-call — not an offline EER-optimised LLR."],
+  ["Privacy retrofitted", "Edge-first Tier-0/1 inference: raw audio & most features never leave the perimeter; only hashes + scores are centralised (DPDP/RBI)."],
+  ["Mutable, siloed audit", "Permissioned Hyperledger-Fabric-style ledger anchors only hashes of consent, scores & escalations — tamper-evident, cross-institution-trustable."],
+  ["Cost & vendor lock-in", "Every layer is permissively-licensed open-source, self-hostable on commodity CPUs/edge NPUs — a genuine $0 stack."],
+  ["OSS cloning has no defence", "The framework itself is the defender toolchain: consent verification, misuse audit and detection are built-in, not bolted on."],
+];
+
 export default function ResearchPage() {
   return (
     <div className="space-y-12">
@@ -106,6 +119,40 @@ export default function ResearchPage() {
               <div className="flex items-center gap-2">
                 <span className="flex h-7 w-7 items-center justify-center rounded-full bg-danger/20 text-xs font-bold text-danger">
                   {i + 1}
+                </span>
+                <h3 className="text-sm font-bold text-white/90">{t}</h3>
+              </div>
+              <p className="mt-2 text-xs leading-relaxed text-white/55">{d}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* PART 3 */}
+      <section className="space-y-6">
+        <SectionTitle n="3" title="Proposed framework — how each gap is closed" />
+        <div className="card border-saffron/30 bg-saffron/5 p-6">
+          <h3 className="font-bold text-saffron">
+            Core philosophy — cascade-triage, not brute force
+          </h3>
+          <p className="mt-2 max-w-3xl text-sm text-white/60">
+            Rather than running one giant multilingual model on every millisecond, a{" "}
+            <b className="text-white/90">three-tier cascade</b> invokes heavy compute only when
+            cheap checks are ambiguous — 80–95% of live audio exits at Tier 0/1, so the system
+            is simultaneously <i>sophisticated</i> (deep models on demand) and{" "}
+            <i>lightweight</i> (median-case compute near-zero, telecom-grade on commodity CPUs).
+            See the{" "}
+            <a href="/architecture" className="text-saffron underline">
+              full architecture blueprint →
+            </a>
+          </p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+          {GAP_FIXES.map(([t, d], i) => (
+            <div key={t} className="card card-hover p-5">
+              <div className="flex items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-full bg-indiagreen/20 text-xs font-bold text-indiagreen">
+                  ✓{i + 1}
                 </span>
                 <h3 className="text-sm font-bold text-white/90">{t}</h3>
               </div>
