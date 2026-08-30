@@ -5,6 +5,7 @@ import { assess } from "@/lib/detectionEngine";
 import { decodeToMono, extractFeatures } from "@/lib/audioFeatures";
 import { synthDemo, encodeWav, type DemoKind } from "@/lib/demoSynth";
 import { anchorRiskAssessment } from "@/lib/ledger";
+import { INDIC_LANGUAGES } from "@/lib/indicRouter";
 import type { AudioFeatures, CallContext, RiskAssessment, SpeakerCheck } from "@/lib/types";
 import { RiskGauge } from "./RiskGauge";
 import { Waveform } from "./Waveform";
@@ -47,6 +48,8 @@ export function DetectorClient() {
     claimedSpeaker: null,
   });
   const [forceTier2, setForceTier2] = useState(false);
+  // operator-selected caller language ("auto" = do not guess / undetermined)
+  const [language, setLanguage] = useState<string>("auto");
 
   // speaker enrollment
   const [enrolled, setEnrolled] = useState<Enrolled | null>(null);
@@ -85,6 +88,7 @@ export function DetectorClient() {
 
         const r = await assess(feats, { ...ctx, claimedSpeaker: enrolled?.name ?? ctx.claimedSpeaker }, speaker, {
           forceTier2,
+          language,
         });
         setResult(r);
       } catch (e: any) {
@@ -93,7 +97,7 @@ export function DetectorClient() {
         setBusy(false);
       }
     },
-    [ctx, enrolled, forceTier2]
+    [ctx, enrolled, forceTier2, language]
   );
 
   const handleFile = useCallback(
@@ -236,6 +240,20 @@ export function DetectorClient() {
                 onChange={(e) => setCtx({ ...ctx, claimedSpeaker: e.target.value || null })}
               />
             </Field>
+            <Field label="Caller language (LID routing)">
+              <select
+                className="input"
+                value={language}
+                onChange={(e) => setLanguage(e.target.value)}
+              >
+                <option value="auto">Auto / undetermined (no guessing)</option>
+                {INDIC_LANGUAGES.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.language} ({l.code})
+                  </option>
+                ))}
+              </select>
+            </Field>
             <Field label="Transaction type">
               <select
                 className="input"
@@ -355,19 +373,27 @@ export function DetectorClient() {
                             ? "#22c55e22"
                             : result.verdict === "SUSPICIOUS"
                             ? "#f59e0b22"
+                            : result.verdict === "INCONCLUSIVE"
+                            ? "#64748b33"
                             : "#ef444422",
                         color:
                           result.verdict === "AUTHENTIC"
                             ? "#22c55e"
                             : result.verdict === "SUSPICIOUS"
                             ? "#f59e0b"
+                            : result.verdict === "INCONCLUSIVE"
+                            ? "#94a3b8"
                             : "#ef4444",
                       }}
                     >
                       {result.verdict.replace("_", " ")}
                     </span>
-                    <span className="pill bg-white/10 text-white/70">
+                    <span
+                      className="pill bg-white/10 text-white/70"
+                      title={result.language.note}
+                    >
                       🌐 {result.language.detected} · {result.language.adapter}
+                      {result.language.source === "undetermined" && " (?)"}
                     </span>
                     <span className="mono pill bg-white/5 text-white/50">
                       ⏱ {result.totalLatencyMs} ms
@@ -498,6 +524,18 @@ export function DetectorClient() {
               <h3 className="mb-3 text-sm font-bold uppercase tracking-wide text-white/50">
                 Indic LID → LoRA adapter routing
               </h3>
+              <p
+                className={`mb-3 rounded-lg p-2 text-xs ${
+                  result.language.source === "undetermined"
+                    ? "bg-white/5 text-white/60"
+                    : result.language.source === "user-selected"
+                    ? "bg-indiagreen/15 text-emerald-200"
+                    : "bg-chakra/15 text-blue-200"
+                }`}
+              >
+                {result.language.source === "undetermined" ? "ℹ️ " : "✓ "}
+                {result.language.note}
+              </p>
               {result.language.codeSwitching && (
                 <p className="mb-3 rounded-lg bg-chakra/20 p-2 text-xs text-blue-200">
                   🔀 Code-switching detected — soft ensemble of top-2 adapters engaged.

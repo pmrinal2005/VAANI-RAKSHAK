@@ -26,10 +26,24 @@ export interface AudioFeatures {
   // Prosody / behavioural biomarkers (Praat/openSMILE-style proxy)
   f0MeanHz: number;
   f0Std: number; // over-smooth TTS -> low pitch variability
-  jitter: number; // micro-tremor of pitch periods
-  shimmer: number; // micro-tremor of amplitude
+  f0RangeHz: number; // voiced-frame p95-p5 pitch range (natural prosody span)
+  jitter: number; // micro-tremor of pitch periods (voiced-only)
+  shimmer: number; // micro-tremor of amplitude (voiced-only)
   speechRateVar: number;
   mfcc: number[]; // 13 mean MFCCs (for embedding proxy)
+
+  // ---- BUG-FIX ADDITIONS: codec-robust + relative discriminators ----
+  // These features fix the "real recorded voice flagged as fake" bug by
+  // separating *codec* artefacts (which hit REAL recordings too) from genuine
+  // *neural-vocoder / synthesis* artefacts.
+  codecCutoffHz: number; // frequency where spectral energy collapses (opus/webm ~7-8k)
+  isLikelyCodec: boolean; // true when the HF loss is a codec, not a vocoder, signature
+  hnrDb: number; // harmonics-to-noise ratio (dB) — TTS is often *too* clean OR too noisy
+  voicedRatio: number; // fraction of frames that are voiced (0..1)
+  spectralFlatnessVoiced: number; // flatness on voiced/energetic frames only (stable)
+  modulation4Hz: number; // 4 Hz syllabic envelope modulation depth (natural speech ~high)
+  f0DeltaVar: number; // variance of frame-to-frame F0 delta (natural contour dynamics)
+  qualityFlag: "ok" | "too_short" | "too_silent" | "low_snr"; // input-quality gate
 }
 
 export type TierId = 0 | 1 | 2;
@@ -67,6 +81,13 @@ export interface LanguageRouting {
   distribution: { language: string; code: string; prob: number }[];
   adapter: string; // LoRA adapter selected
   codeSwitching: boolean;
+  /** Where the language decision came from. The pure-DSP web demo CANNOT truly
+   * identify a spoken language from acoustics alone, so by default this is
+   * "undetermined" (honest) rather than a confidently-wrong guess. A real
+   * IndicLID ONNX model (loaded via the Colab export) sets this to "onnx-lid". */
+  source: "onnx-lid" | "acoustic-heuristic" | "undetermined" | "user-selected";
+  /** Human-readable note explaining the routing decision / limitation. */
+  note: string;
 }
 
 export interface SpeakerCheck {
@@ -90,7 +111,7 @@ export interface CallContext {
 export interface RiskAssessment {
   riskScore: number; // 0..100
   band: "LOW" | "ELEVATED" | "HIGH" | "CRITICAL";
-  verdict: "AUTHENTIC" | "SUSPICIOUS" | "LIKELY_CLONE";
+  verdict: "AUTHENTIC" | "SUSPICIOUS" | "LIKELY_CLONE" | "INCONCLUSIVE";
   tiers: TierResult[];
   votes: SignalVote[];
   shap: ShapContribution[];

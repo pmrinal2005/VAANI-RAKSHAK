@@ -81,10 +81,16 @@ function hann(N: number): Float32Array {
   return w;
 }
 
-/** Autocorrelation-based pitch (F0) estimate for a frame. */
-function estimateF0(frame: Float32Array, sr: number): number {
+/** Autocorrelation-based pitch (F0) estimate + normalised periodicity strength.
+ * strength ∈ [0,1] is the normalised autocorrelation peak — used both to gate
+ * voicing (fixing the "real speech looks synthetic" bug) and to estimate HNR. */
+function estimateF0Strength(frame: Float32Array, sr: number): { f0: number; strength: number } {
   const minLag = Math.floor(sr / 400); // 400 Hz
   const maxLag = Math.floor(sr / 70); // 70 Hz
+  // energy at lag 0 (normaliser)
+  let r0 = 0;
+  for (let i = 0; i < frame.length; i++) r0 += frame[i] * frame[i];
+  r0 = r0 || 1e-9;
   let bestLag = 0;
   let bestCorr = 0;
   for (let lag = minLag; lag <= maxLag && lag < frame.length; lag++) {
@@ -95,7 +101,66 @@ function estimateF0(frame: Float32Array, sr: number): number {
       bestLag = lag;
     }
   }
-  return bestLag > 0 ? sr / bestLag : 0;
+  const strength = Math.max(0, Math.min(1, bestCorr / r0));
+  return { f0: bestLag > 0 ? sr / bestLag : 0, strength };
+}
+
+/** Mean normalised autocorrelation strength over voiced frames (for HNR). */
+function voicedAutoStrength(
+  wav: Float32Array,
+  sr: number,
+  hop: number,
+  frameLen: number,
+  energyThr: number
+): number {
+  const vals: number[] = [];
+  for (let s = 0; s + frameLen < wav.length; s += hop) {
+    const fr = wav.subarray(s, s + frameLen);
+    let e = 0;
+    for (let i = 0; i < fr.length; i++) e += fr[i] * fr[i];
+    if (Math.sqrt(e / fr.length) < energyThr) continue;
+    const { f0, strength } = estimateF0Strength(fr, sr);
+    if (f0 >= 70 && f0 <= 400) vals.push(strength);
+  }
+  return vals.length ? vals.reduce((a, b) => a + b, 0) / vals.length : 0;
+}
+
+/** Spectral flatness computed only over voiced/energetic frames (stable). */
+function voicedSpectralFlatness(
+  wav: Float32Array,
+  sr: number,
+  hop: number,
+  frameLen: number,
+  energyThr: number
+): number {
+  const N = 512;
+  const w = hann(N);
+  const flatnesses: number[] = [];
+  for (let s = 0; s + frameLen < wav.length; s += hop) {
+    let e = 0;
+    for (let i = 0; i < frameLen; i++) e += wav[s + i] * wav[s + i];
+    if (Math.sqrt(e / frameLen) < energyThr) continue;
+    const seg = new Float32Array(N);
+    for (let i = 0; i < N; i++) seg[i] = (wav[s + i] || 0) * w[i];
+    const { mag } = magnitudeSpectrum(seg);
+    let logSum = 0;
+    let arith = 0;
+    let cnt = 0;
+    // restrict to the speech band (<= codec-safe 3.8 kHz) so codec HF loss
+    // does NOT inflate flatness for real recordings
+    const kMax = Math.min(mag.length, Math.floor((3800 * N) / sr));
+    for (let k = 1; k < kMax; k++) {
+      const m = mag[k] + 1e-9;
+      logSum += Math.log(m);
+      arith += m;
+      cnt++;
+    }
+    if (!cnt) continue;
+    const geo = Math.exp(logSum / cnt);
+    flatnesses.push(geo / (arith / cnt + 1e-9));
+  }
+  if (!flatnesses.length) return 0;
+  return flatnesses.reduce((a, b) => a + b, 0) / flatnesses.length;
 }
 
 /** Compute the full feature vector used by the cascade tiers + fusion engine. */
@@ -169,24 +234,85 @@ export function extractFeatures(rawSamples: Float32Array, sampleRate: number): A
   for (let k = 0; k < mag.length; k++) if (freqs[k] > 6000) hf += mag[k];
   const hfEnergyRatio = hf / magSum;
 
+  // ---- BUG-FIX: codec cutoff detection ----------------------------------
+  // Real recordings from MediaRecorder (webm/opus) and phone codecs sharply
+  // low-pass audio around 7-8 kHz. The ORIGINAL engine read that as a
+  // "vocoder cutoff" and flagged genuine recordings as fake. Here we locate
+  // the cutoff and decide whether it looks like a *codec* (broadband loss with
+  // a clean shelf) vs a genuine synthesis artefact.
+  // Build a smoothed energy-vs-frequency profile and find the highest freq that
+  // still carries a meaningful fraction of the peak-band energy.
+  const bandHz = 500;
+  const nProfBands = Math.floor((TARGET_SR / 2) / bandHz);
+  const prof = new Float32Array(nProfBands);
+  for (let k = 0; k < mag.length; k++) {
+    const bi = Math.min(nProfBands - 1, Math.floor(freqs[k] / bandHz));
+    prof[bi] += mag[k];
+  }
+  let profPeak = 1e-9;
+  for (let b = 0; b < nProfBands; b++) profPeak = Math.max(profPeak, prof[b]);
+  // cutoff = highest band whose energy is >= 5% of the peak band
+  let codecCutoffHz = TARGET_SR / 2;
+  for (let b = nProfBands - 1; b >= 0; b--) {
+    if (prof[b] >= 0.05 * profPeak) {
+      codecCutoffHz = (b + 1) * bandHz;
+      break;
+    }
+  }
+  // A codec cutoff is a HARD shelf (steep drop) at a "round" telephony/opus
+  // frequency (3.4k / 7k / 8k). Measure the drop steepness just below cutoff.
+  const cutoffBand = Math.min(nProfBands - 1, Math.floor(codecCutoffHz / bandHz));
+  const belowE = prof[Math.max(0, cutoffBand - 1)] + 1e-9;
+  const aboveE = prof[Math.min(nProfBands - 1, cutoffBand + 1)] + 1e-9;
+  const dropRatio = belowE / aboveE; // large => steep shelf (codec-like)
+  const isLikelyCodec = codecCutoffHz <= 8200 && dropRatio > 6;
+
   // phase discontinuity proxy: 2nd difference of the signal (roughness)
   let d2 = 0;
   for (let i = 2; i < T; i++) d2 += Math.abs(wav[i] - 2 * wav[i - 1] + wav[i - 2]);
   const phaseDiscontinuity = d2 / T;
 
-  // ---- frame-wise features: F0, jitter, shimmer, cepstral variance ----
+  // ---- frame-wise features: F0, jitter, shimmer (VOICED-ONLY) ----
+  // BUG-FIX: the original computed jitter/shimmer over ALL frames incl. silence
+  // & unvoiced noise, which made REAL speech look "too smooth" (fake). We now
+  // gate on a per-frame voicing decision (energy + autocorrelation strength) so
+  // jitter/shimmer reflect genuine glottal micro-variation, matching how
+  // Praat/openSMILE compute them.
   const frameLen = 512;
   const hop = 256;
-  const f0s: number[] = [];
-  const frameEnergies: number[] = [];
-  const centroids: number[] = [];
+  const f0s: number[] = []; // voiced F0 track
+  const voicedEnergies: number[] = []; // energies of voiced frames only
+  const allEnergies: number[] = [];
+  const envelope: number[] = []; // full amplitude envelope (for 4Hz modulation)
+  let voicedFrames = 0;
+  let totalFrames = 0;
+
+  // global energy reference for voicing gate
+  let gMax = 1e-9;
+  for (let s = 0; s + frameLen < T; s += hop) {
+    let e = 0;
+    for (let i = 0; i < frameLen; i++) e += wav[s + i] * wav[s + i];
+    gMax = Math.max(gMax, Math.sqrt(e / frameLen));
+  }
+  const voiceEnergyThr = 0.12 * gMax; // frame must carry real energy to be voiced
+
   for (let s = 0; s + frameLen < T; s += hop) {
     const fr = wav.subarray(s, s + frameLen);
-    const f0 = estimateF0(fr, sr);
-    if (f0 > 0) f0s.push(f0);
     let e = 0;
     for (let i = 0; i < fr.length; i++) e += fr[i] * fr[i];
-    frameEnergies.push(Math.sqrt(e / fr.length));
+    const rmsFrame = Math.sqrt(e / fr.length);
+    allEnergies.push(rmsFrame);
+    envelope.push(rmsFrame);
+    totalFrames++;
+
+    if (rmsFrame < voiceEnergyThr) continue; // silence / very low energy -> unvoiced
+    const { f0, strength } = estimateF0Strength(fr, sr);
+    // voiced iff a clear periodicity exists in the human-speech F0 range
+    if (f0 >= 70 && f0 <= 400 && strength > 0.35) {
+      f0s.push(f0);
+      voicedEnergies.push(rmsFrame);
+      voicedFrames++;
+    }
   }
 
   const mean = (a: number[]) => (a.length ? a.reduce((x, y) => x + y, 0) / a.length : 0);
@@ -195,26 +321,74 @@ export function extractFeatures(rawSamples: Float32Array, sampleRate: number): A
     const m = mean(a);
     return Math.sqrt(a.reduce((x, y) => x + (y - m) ** 2, 0) / a.length);
   };
+  const percentile = (a: number[], p: number) => {
+    if (!a.length) return 0;
+    const sorted = [...a].sort((x, y) => x - y);
+    const idx = Math.min(sorted.length - 1, Math.max(0, Math.round((p / 100) * (sorted.length - 1))));
+    return sorted[idx];
+  };
 
+  const voicedRatio = totalFrames ? voicedFrames / totalFrames : 0;
   const f0MeanHz = mean(f0s);
   const f0Std = std(f0s);
+  const f0RangeHz = f0s.length > 3 ? percentile(f0s, 95) - percentile(f0s, 5) : 0;
 
-  // jitter: mean abs relative difference of consecutive F0 periods
+  // F0 delta dynamics (natural pitch contour moves; over-smooth TTS is flatter)
+  const f0Deltas: number[] = [];
+  for (let i = 1; i < f0s.length; i++) f0Deltas.push(f0s[i] - f0s[i - 1]);
+  const f0DeltaVar = std(f0Deltas);
+
+  // jitter: mean abs relative difference of consecutive VOICED F0 values
   let jitter = 0;
   if (f0s.length > 1) {
     let acc = 0;
     for (let i = 1; i < f0s.length; i++) acc += Math.abs(f0s[i] - f0s[i - 1]) / (f0s[i - 1] + 1e-9);
     jitter = acc / (f0s.length - 1);
   }
-  // shimmer: mean abs relative difference of consecutive frame energies
+  // shimmer: mean abs relative difference of consecutive VOICED frame energies
   let shimmer = 0;
-  if (frameEnergies.length > 1) {
+  if (voicedEnergies.length > 1) {
     let acc = 0;
-    for (let i = 1; i < frameEnergies.length; i++)
-      acc += Math.abs(frameEnergies[i] - frameEnergies[i - 1]) / (frameEnergies[i - 1] + 1e-9);
-    shimmer = acc / (frameEnergies.length - 1);
+    for (let i = 1; i < voicedEnergies.length; i++)
+      acc += Math.abs(voicedEnergies[i] - voicedEnergies[i - 1]) / (voicedEnergies[i - 1] + 1e-9);
+    shimmer = acc / (voicedEnergies.length - 1);
   }
-  const speechRateVar = std(frameEnergies);
+  const speechRateVar = std(allEnergies);
+
+  // ---- 4 Hz syllabic modulation depth --------------------------------------
+  // Natural speech has strong ~4 Hz envelope modulation (syllable rate).
+  // Compute normalised energy at 4 Hz of the frame-envelope signal.
+  const envRate = sr / hop; // envelope sample rate (~62.5 Hz)
+  let mod4 = 0;
+  if (envelope.length > 8) {
+    const envMean = mean(envelope);
+    let re = 0;
+    let im = 0;
+    for (let n = 0; n < envelope.length; n++) {
+      const ang = (-2 * Math.PI * 4 * n) / envRate;
+      re += (envelope[n] - envMean) * Math.cos(ang);
+      im += (envelope[n] - envMean) * Math.sin(ang);
+    }
+    const envStd = std(envelope) + 1e-9;
+    mod4 = Math.sqrt(re * re + im * im) / (envelope.length * envStd);
+  }
+  const modulation4Hz = mod4;
+
+  // ---- Harmonics-to-Noise Ratio (HNR, dB) ----------------------------------
+  // From mean voiced autocorrelation strength: r/(1-r) in dB. Real voices sit
+  // in a mid range; extreme values (very clean OR very noisy) are informative.
+  const meanStrength = f0s.length ? voicedAutoStrength(wav, sr, hop, frameLen, voiceEnergyThr) : 0;
+  const rHNR = Math.min(0.999, Math.max(0.001, meanStrength));
+  const hnrDb = 10 * Math.log10(rHNR / (1 - rHNR));
+
+  // ---- voiced-only spectral flatness (stable, noise-robust) ----------------
+  const spectralFlatnessVoiced = voicedSpectralFlatness(wav, sr, hop, frameLen, voiceEnergyThr);
+
+  // ---- input-quality gate --------------------------------------------------
+  let qualityFlag: "ok" | "too_short" | "too_silent" | "low_snr" = "ok";
+  if (dur < 0.6) qualityFlag = "too_short";
+  else if (silenceRatio > 0.85 || voicedRatio < 0.06) qualityFlag = "too_silent";
+  else if (rmsDb < -45) qualityFlag = "low_snr";
 
   // cepstral variance proxies (use log-spectrum roughness as CQCC/LFCC stand-in)
   const cqccVar = spread / 1000;
@@ -254,10 +428,20 @@ export function extractFeatures(rawSamples: Float32Array, sampleRate: number): A
     lfccVar: round(lfccVar, 4),
     f0MeanHz: round(f0MeanHz, 1),
     f0Std: round(f0Std, 2),
+    f0RangeHz: round(f0RangeHz, 1),
     jitter: round(jitter, 4),
     shimmer: round(shimmer, 4),
     speechRateVar: round(speechRateVar, 4),
     mfcc: mfcc.map((v) => round(v, 3)),
+    // codec-robust additions
+    codecCutoffHz: round(codecCutoffHz, 0),
+    isLikelyCodec,
+    hnrDb: round(hnrDb, 2),
+    voicedRatio: round(voicedRatio, 3),
+    spectralFlatnessVoiced: round(spectralFlatnessVoiced, 4),
+    modulation4Hz: round(modulation4Hz, 4),
+    f0DeltaVar: round(f0DeltaVar, 3),
+    qualityFlag,
   };
 }
 
@@ -272,6 +456,8 @@ export function featureVector(f: AudioFeatures): number[] {
     f.durationSec, f.rmsDb, f.silenceRatio, f.crestFactor,
     f.spectralCentroidHz, f.spectralSpreadHz, f.spectralFlatness, f.spectralRolloffHz,
     f.zeroCrossingRate, f.phaseDiscontinuity, f.hfEnergyRatio, f.cqccVar, f.lfccVar,
-    f.f0MeanHz, f.f0Std, f.jitter, f.shimmer, f.speechRateVar, ...f.mfcc,
+    f.f0MeanHz, f.f0Std, f.f0RangeHz, f.jitter, f.shimmer, f.speechRateVar,
+    f.codecCutoffHz, f.isLikelyCodec ? 1 : 0, f.hnrDb, f.voicedRatio,
+    f.spectralFlatnessVoiced, f.modulation4Hz, f.f0DeltaVar, ...f.mfcc,
   ];
 }
