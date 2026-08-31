@@ -1,3 +1,5 @@
+"use client";
+
 export function RiskGauge({ score, band }: { score: number; band: string }) {
   const radius = 84;
   const circ = Math.PI * radius;

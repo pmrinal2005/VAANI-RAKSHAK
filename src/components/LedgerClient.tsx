@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useState } from "react";
 import type { LedgerBlock } from "@/lib/types";
 import {

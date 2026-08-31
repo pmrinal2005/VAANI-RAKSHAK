@@ -1,4 +1,7 @@
-import { Link, useLocation } from "react-router-dom";
+"use client";
+
+import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useState } from "react";
 
 const LINKS = [
@@ -11,13 +14,13 @@ const LINKS = [
 ];
 
 export function NavBar() {
-  const { pathname } = useLocation();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
 
   return (
     <div className="sticky top-0 z-50 px-3 pt-3 sm:px-6 lg:px-8">
       <nav className="landing-nav-shell mx-auto flex max-w-7xl items-center justify-between gap-3 rounded-full px-3 py-2 sm:px-4">
-        <Link to="/" className="flex items-center gap-2.5">
+        <Link href="/" className="flex items-center gap-2.5">
           <span className="flex h-9 w-9 items-center justify-center rounded-full bg-gradient-to-br from-saffron to-indiagreen text-lg font-black text-ink-950">
             वा
           </span>
@@ -46,7 +49,7 @@ export function NavBar() {
             return (
               <li key={l.href}>
                 <Link
-                  to={l.href}
+                  href={l.href}
                   className={`rounded-full px-3 py-2 text-sm font-medium transition-colors ${
                     active
                       ? "bg-white/15 text-white"
@@ -67,7 +70,7 @@ export function NavBar() {
             {LINKS.map((l) => (
               <li key={l.href}>
                 <Link
-                  to={l.href}
+                  href={l.href}
                   onClick={() => setOpen(false)}
                   className={`block rounded-2xl px-4 py-3 text-sm font-medium ${
                     pathname === l.href

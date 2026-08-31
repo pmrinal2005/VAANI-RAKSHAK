@@ -1,8 +1,11 @@
-import { useLocation } from "react-router-dom";
+"use client";
+
+import type { ReactNode } from "react";
+import { usePathname } from "next/navigation";
 import { NavBar } from "@/components/NavBar";
 
-export function SiteChrome({ children }: { children: React.ReactNode }) {
-  const { pathname } = useLocation();
+export function SiteChrome({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
   const isLanding = pathname === "/";
 
   if (isLanding) {

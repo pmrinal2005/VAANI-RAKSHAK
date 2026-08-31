@@ -1,3 +1,5 @@
+"use client";
+
 import { useEffect, useRef } from "react";
 
 export function MelSpectrogram({ samples }: { samples: Float32Array | null }) {

@@ -1,3 +1,5 @@
+"use client";
+
 import { ChevronLeft, ChevronRight } from "lucide-react";
 
 type Props = {
@@ -13,22 +15,24 @@ export function SlideControls({ index, total, label, onPrev, onNext }: Props) {
   const t = String(total).padStart(2, "0");
 
   return (
-    <div className="absolute bottom-0 left-0 right-0 z-50 px-8 pb-6 lg:px-12">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <span className="text-xs uppercase tracking-[0.2em] text-white/30">
+    <div className="pointer-events-none absolute bottom-0 left-0 right-0 z-50 px-4 pb-4 sm:px-8 sm:pb-6 lg:px-12">
+      <div className="pointer-events-auto flex items-center justify-between gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="shrink-0 text-xs uppercase tracking-[0.2em] text-white/30">
             {n} / {t}
           </span>
-          <span className="h-4 w-px bg-white/15" />
-          <span className="text-xs text-white/50">{label}</span>
+          <span className="hidden h-4 w-px bg-white/15 sm:block" />
+          <span className="truncate text-xs text-white/50">{label}</span>
         </div>
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-1.5">
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-1 sm:gap-1.5">
             {Array.from({ length: total }).map((_, i) => (
               <span
                 key={i}
                 className={`h-1 rounded-full transition-all duration-500 ${
-                  i === index ? "w-24 bg-white" : "w-8 bg-white/20 hover:bg-white/40"
+                  i === index
+                    ? "w-8 bg-white sm:w-16 lg:w-24"
+                    : "w-3 bg-white/20 hover:bg-white/40 sm:w-6 lg:w-8"
                 }`}
               />
             ))}

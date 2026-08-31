@@ -1,7 +1,9 @@
+"use client";
+
 import { motion } from "motion/react";
 import { ArrowUpRight } from "lucide-react";
 import { BlurText } from "@/components/BlurText";
-import { Link } from "react-router-dom";
+import Link from "next/link";
 
 const VIDEO =
   "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260411_104229_49794008-3d16-4cb6-9a8c-73d7751b0e79.mp4";
@@ -69,7 +71,7 @@ export function TitleSlide() {
             transition={{ delay: 1.1 }}
           >
             <Link
-              to="/detect"
+              href="/detect"
               className="liquid-glass-strong inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-medium text-white"
             >
               Open Live Detector
