@@ -1,10 +1,12 @@
-import { useEffect, useRef } from "react";
+"use client";
+
+import { useEffect, useRef, type CSSProperties } from "react";
 import Hls from "hls.js";
 
 type Props = {
   src: string;
   className?: string;
-  style?: React.CSSProperties;
+  style?: CSSProperties;
 };
 
 export function HlsVideo({ src, className, style }: Props) {

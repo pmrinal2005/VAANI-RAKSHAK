@@ -1,5 +1,7 @@
+"use client";
+
 import { motion } from "motion/react";
-import { Link } from "react-router-dom";
+import Link from "next/link";
 import { useEffect, useState } from "react";
 import { ArrowUpRight, Menu, X } from "lucide-react";
 import { BlurText } from "@/components/BlurText";
@@ -110,7 +112,7 @@ export function LandingPage() {
             {NAV.map((l) => (
               <li key={l.to}>
                 <Link
-                  to={l.to}
+                  href={l.to}
                   className="rounded-full px-3 py-2 text-sm font-medium text-white/70 hover:bg-white/10 hover:text-white"
                 >
                   {l.label}
@@ -120,7 +122,7 @@ export function LandingPage() {
           </ul>
           <div className="flex items-center gap-2">
             <Link
-              to="/detect"
+              href="/detect"
               className="hidden rounded-full bg-white px-4 py-2 text-xs font-semibold text-black sm:inline-flex"
             >
               Catch a clone
@@ -140,7 +142,7 @@ export function LandingPage() {
               {NAV.map((l) => (
                 <li key={l.to}>
                   <Link
-                    to={l.to}
+                    href={l.to}
                     onClick={() => setOpen(false)}
                     className="block rounded-2xl px-4 py-3 text-sm text-white/80"
                   >
@@ -198,7 +200,7 @@ export function LandingPage() {
               transition={{ delay: 1.05 }}
             >
               <Link
-                to="/detect"
+                href="/detect"
                 className="liquid-glass-strong inline-flex items-center gap-2 rounded-full px-6 py-3 text-sm font-semibold text-white"
               >
                 Open Live Detector

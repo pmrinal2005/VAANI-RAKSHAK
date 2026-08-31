@@ -1,3 +1,5 @@
+"use client";
+
 import type { ShapContribution } from "@/lib/types";
 
 export function ShapBars({ shap }: { shap: ShapContribution[] }) {

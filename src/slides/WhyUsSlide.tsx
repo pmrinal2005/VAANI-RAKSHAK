@@ -1,3 +1,5 @@
+"use client";
+
 import { motion } from "motion/react";
 import { Zap, Eye, Shield, Landmark } from "lucide-react";
 

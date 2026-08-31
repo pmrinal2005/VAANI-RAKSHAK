@@ -1,3 +1,5 @@
+"use client";
+
 import { motion } from "motion/react";
 import { HlsVideo } from "@/components/HlsVideo";
 

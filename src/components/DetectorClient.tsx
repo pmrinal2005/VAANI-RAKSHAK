@@ -1,3 +1,5 @@
+"use client";
+
 import { useCallback, useRef, useState } from "react";
 import { assess } from "@/lib/detectionEngine";
 import { decodeToMono, extractFeatures } from "@/lib/audioFeatures";
@@ -95,6 +97,25 @@ export function DetectorClient() {
           { forceTier2, language }
         );
         setResult(r);
+        void fetch("/api/detections", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            verdict: r.verdict,
+            band: r.band,
+            riskScore: r.riskScore,
+            language: r.language.detected,
+            explanation: r.smartExplanation,
+            featureHash: r.featureHash,
+            latencyMs: r.totalLatencyMs,
+            requiresOutOfBand: r.requiresOutOfBand,
+            payload: {
+              votes: r.votes,
+              shap: r.shap,
+              language: r.language,
+            },
+          }),
+        }).catch(() => {});
       } catch (e: unknown) {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
@@ -179,7 +200,15 @@ export function DetectorClient() {
 
   const anchor = async () => {
     if (!result) return;
-    await anchorRiskAssessment(result);
+    const chain = await anchorRiskAssessment(result);
+    const last = chain[chain.length - 1];
+    if (last) {
+      void fetch("/api/ledger", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(last),
+      }).catch(() => {});
+    }
     setAnchored(true);
   };
 

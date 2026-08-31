@@ -1,6 +1,8 @@
+"use client";
+
 import { motion } from "motion/react";
 import { ArrowUpRight, Mail } from "lucide-react";
-import { Link } from "react-router-dom";
+import Link from "next/link";
 
 const VIDEO =
   "https://d8j0ntlcm91z4.cloudfront.net/user_38xzZboKViGWJOttwIXH07lWA1P/hf_20260324_024928_1efd0b0d-6c02-45a8-8847-1030900c4f63.mp4";
@@ -54,14 +56,14 @@ export function CtaSlide() {
               transition={{ delay: 0.7 }}
             >
               <Link
-                to="/detect"
+                href="/detect"
                 className="inline-flex items-center gap-2 rounded-full bg-white px-6 py-3 font-body text-sm font-semibold text-black"
               >
                 Open Live Detector
                 <ArrowUpRight className="h-4 w-4" />
               </Link>
               <Link
-                to="/architecture"
+                href="/architecture"
                 className="liquid-glass-strong inline-flex rounded-full px-6 py-3 font-body text-sm font-medium text-white"
               >
                 See the blueprint
@@ -100,13 +102,13 @@ export function CtaSlide() {
             © 2026 VAANI-RAKSHAK. All rights reserved.
           </span>
           <div className="flex gap-4 text-xs text-white/30">
-            <Link to="/research" className="hover:text-white/60">
+            <Link href="/research" className="hover:text-white/60">
               Research
             </Link>
-            <Link to="/ledger" className="hover:text-white/60">
+            <Link href="/ledger" className="hover:text-white/60">
               Ledger
             </Link>
-            <Link to="/colab" className="hover:text-white/60">
+            <Link href="/colab" className="hover:text-white/60">
               Models
             </Link>
           </div>
