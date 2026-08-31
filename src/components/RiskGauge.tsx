@@ -1,8 +1,6 @@
-"use client";
-
 export function RiskGauge({ score, band }: { score: number; band: string }) {
   const radius = 84;
-  const circ = Math.PI * radius; // semicircle
+  const circ = Math.PI * radius;
   const pct = Math.max(0, Math.min(100, score)) / 100;
   const dash = circ * pct;
   const color =
@@ -12,34 +10,41 @@ export function RiskGauge({ score, band }: { score: number; band: string }) {
     <div className="flex flex-col items-center">
       <svg width="220" height="130" viewBox="0 0 220 130">
         <path
-          d="M 20 120 A 90 90 0 0 1 200 120"
+          d="M26 118 A84 84 0 0 1 194 118"
           fill="none"
-          stroke="rgba(255,255,255,0.08)"
-          strokeWidth="16"
+          stroke="rgba(255,255,255,0.1)"
+          strokeWidth="14"
           strokeLinecap="round"
         />
         <path
-          d="M 20 120 A 90 90 0 0 1 200 120"
+          d="M26 118 A84 84 0 0 1 194 118"
           fill="none"
           stroke={color}
-          strokeWidth="16"
+          strokeWidth="14"
           strokeLinecap="round"
           strokeDasharray={`${dash} ${circ}`}
-          style={{ transition: "stroke-dasharray 0.8s ease, stroke 0.4s" }}
         />
-        <text x="110" y="98" textAnchor="middle" className="fill-white" fontSize="40" fontWeight="800">
+        <text
+          x="110"
+          y="92"
+          textAnchor="middle"
+          fill="#fff"
+          fontSize="36"
+          fontFamily="Instrument Serif, serif"
+          fontStyle="italic"
+        >
           {score}
         </text>
-        <text x="110" y="118" textAnchor="middle" fill="rgba(255,255,255,0.45)" fontSize="12">
+        <text x="110" y="112" textAnchor="middle" fill="rgba(255,255,255,0.5)" fontSize="11">
           / 100
         </text>
       </svg>
-      <span
-        className="pill mt-1"
-        style={{ background: `${color}22`, color, border: `1px solid ${color}55` }}
+      <div
+        className="mt-1 rounded-full px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.16em]"
+        style={{ color, background: `${color}22` }}
       >
         ● {band} RISK
-      </span>
+      </div>
     </div>
   );
 }

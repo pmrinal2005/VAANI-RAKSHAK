@@ -1,24 +1,6 @@
 // ============================================================================
 // VAANI-RAKSHAK — Indic Multilingual LID + LoRA Adapter Router
-//
-// ── BUG-FIX (wrong language every time) ─────────────────────────────────────
-// The previous version "detected" a language from a Math.sin() hash of spectral
-// features. That is NOT language identification — spoken-language ID requires a
-// trained acoustic/phonotactic model (e.g. AI4Bharat IndicLID). The old hash
-// produced a different, essentially random label per clip (biased to Hindi),
-// which is exactly the reported bug.
-//
-// The honest, correct behaviour for a pure client-side DSP demo:
-//   1. DEFAULT → `undetermined`: we do NOT fabricate a language. The UI shows a
-//      clear note that real LID requires the ONNX model exported from Colab.
-//   2. USER-SELECTED → if the operator picks the caller's (registered) language,
-//      we route to that language's LoRA adapter with confidence 1.0. This is
-//      realistic: banks/telecoms usually know the customer's registered
-//      language, and it removes the gu! from the demo.
-//   3. ONNX-LID → if a real IndicLID ONNX session is wired in (see
-//      `setOnnxLid`), its probability distribution is used directly.
-// This keeps the framework's cross-lingual adapter story intact while never
-// showing a confidently-wrong language.
+// Honest default is "undetermined" — DSP cannot identify a spoken language.
 // ============================================================================
 
 import type { AudioFeatures, LanguageRouting } from "./types";
@@ -40,27 +22,18 @@ export const INDIC_LANGUAGES = [
 
 export type IndicCode = (typeof INDIC_LANGUAGES)[number]["code"];
 
-/** Optional real LID hook. When a trained IndicLID ONNX model is loaded, set a
- *  callback here (from the client) that maps features/waveform → distribution. */
-type OnnxLidFn = (
-  f: AudioFeatures
-) => { code: string; prob: number }[] | null;
+type OnnxLidFn = (f: AudioFeatures) => { code: string; prob: number }[] | null;
 let onnxLid: OnnxLidFn | null = null;
 export function setOnnxLid(fn: OnnxLidFn | null) {
   onnxLid = fn;
 }
 
-const UNDETERMINED_DIST = [
-  { language: "Undetermined", code: "und", prob: 1 },
-];
+const UNDETERMINED_DIST = [{ language: "Undetermined", code: "und", prob: 1 }];
 
-/**
- * Route an utterance to a language adapter.
- * @param f       extracted audio features
- * @param manual  optional operator-selected language code (from the UI)
- */
-export function routeLanguage(f: AudioFeatures, manual?: string | null): LanguageRouting {
-  // 1) Operator-selected language (honest, realistic for KYC-verified callers)
+export function routeLanguage(
+  f: AudioFeatures,
+  manual?: string | null
+): LanguageRouting {
   if (manual && manual !== "auto" && manual !== "und") {
     const chosen = INDIC_LANGUAGES.find((l) => l.code === manual);
     if (chosen) {
@@ -77,7 +50,6 @@ export function routeLanguage(f: AudioFeatures, manual?: string | null): Languag
     }
   }
 
-  // 2) Real ONNX IndicLID model, if wired in
   if (onnxLid) {
     const dist = onnxLid(f);
     if (dist && dist.length) {
@@ -109,7 +81,6 @@ export function routeLanguage(f: AudioFeatures, manual?: string | null): Languag
     }
   }
 
-  // 3) Honest default — DO NOT fabricate a language from DSP alone.
   return {
     detected: "Undetermined",
     code: "und",

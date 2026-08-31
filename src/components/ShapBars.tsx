@@ -1,5 +1,3 @@
-"use client";
-
 import type { ShapContribution } from "@/lib/types";
 
 export function ShapBars({ shap }: { shap: ShapContribution[] }) {
@@ -21,19 +19,13 @@ export function ShapBars({ shap }: { shap: ShapContribution[] }) {
             <div className="flex items-center">
               <div className="flex h-2 w-1/2 justify-end">
                 {!pos && (
-                  <div
-                    className="h-2 rounded-l-full bg-safe/70"
-                    style={{ width: `${w}%` }}
-                  />
+                  <div className="h-2 rounded-l-full bg-safe/70" style={{ width: `${w}%` }} />
                 )}
               </div>
               <div className="h-2 w-px bg-white/25" />
               <div className="flex h-2 w-1/2 justify-start">
                 {pos && (
-                  <div
-                    className="h-2 rounded-r-full bg-danger/70"
-                    style={{ width: `${w}%` }}
-                  />
+                  <div className="h-2 rounded-r-full bg-danger/70" style={{ width: `${w}%` }} />
                 )}
               </div>
             </div>
