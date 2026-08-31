@@ -24,6 +24,9 @@ const config: Config = {
       fontFamily: {
         sans: ["var(--font-inter)", "system-ui", "sans-serif"],
         mono: ["ui-monospace", "SFMono-Regular", "Menlo", "monospace"],
+        // Akashara design-system typefaces (ported for landing + shared chrome)
+        heading: ['"Instrument Serif"', "serif"],
+        body: ['"Barlow"', '"Inter"', "sans-serif"],
       },
       boxShadow: {
         glow: "0 0 40px -10px rgba(255,153,51,0.35)",

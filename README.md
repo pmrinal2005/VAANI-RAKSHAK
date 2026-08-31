@@ -25,6 +25,17 @@ ECAPA-TDNN, LightGBM+SHAP) and exports them to ONNX for edge deployment.
 
 ---
 
+## 🎬 Cinematic Landing (UI/UX Refresh)
+
+The landing page (`/`) is a full-bleed cinematic surface built on a shared **"liquid-glass" design system** (Instrument Serif + Barlow typography, glassmorphism, blur-in reveals, animated video backgrounds, orbital loader, floating glass navbar). It clones the first two sections of that design language:
+
+1. **Hero** — video background, blur-in headline *"Catch the Cloned Voice Before It Speaks"*, hooking attack-stat badge, primary CTA into the Live Detector, and three glass KPI cards (`<5 ms`, `22 languages`, `$0`).
+2. **The Cascade** — mirrored video background with three glass capability cards mapping VAANI's Tier 0/1/2 cascade.
+
+> UI/UX only: the **Live Detector dashboard** (`/detect`) and every other route keep their original functionality untouched — only the shared chrome (fonts, glass navbar) is restyled. The landing route hides the standard sticky NavBar/footer (it ships its own floating glass nav); all other routes keep the full chrome via `SiteChrome`.
+
+---
+
 ## ✅ Currently Completed Features
 
 | # | Feature | Where |
