@@ -1,0 +1,151 @@
+# ==============================================================================
+# VAANI-RAKSHAK — Development Docker Compose
+#
+# Services:
+#   vaani-api   — FastAPI backend (this repo)
+#   zookeeper   — Kafka coordination (Phase 2 dependency)
+#   kafka       — Event streaming broker (Phase 2 dependency)
+#
+# NOT included (out of scope per R2 mandate):
+#   Hyperledger Fabric, Flower, Opacus, K3s, Prometheus, Grafana
+#
+# Usage:
+#   docker compose up -d
+#   docker compose logs -f vaani-api
+#   docker compose down -v   # removes volumes
+# ==============================================================================
+
+version: "3.9"
+
+services:
+
+  # --------------------------------------------------------------------------
+  # VAANI-RAKSHAK FastAPI Backend
+  # --------------------------------------------------------------------------
+  vaani-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    image: vaani-rakshak-backend:dev
+    container_name: vaani-api
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      APP_ENV: development
+      LOG_JSON: "false"
+      LOG_LEVEL: DEBUG
+      API_HOST: "0.0.0.0"
+      API_PORT: "8000"
+      KAFKA_BOOTSTRAP_SERVERS: kafka:29092   # internal Docker network address
+      DETECTION_MODE: mock
+    depends_on:
+      kafka:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health/live')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - vaani-net
+
+  # --------------------------------------------------------------------------
+  # Zookeeper (required by Kafka)
+  # --------------------------------------------------------------------------
+  zookeeper:
+    image: confluentinc/cp-zookeeper:7.6.1
+    container_name: vaani-zookeeper
+    restart: unless-stopped
+    environment:
+      ZOOKEEPER_CLIENT_PORT: 2181
+      ZOOKEEPER_TICK_TIME: 2000
+      ZOOKEEPER_LOG4J_ROOT_LOGLEVEL: WARN
+    volumes:
+      - zookeeper-data:/var/lib/zookeeper/data
+      - zookeeper-log:/var/lib/zookeeper/log
+    networks:
+      - vaani-net
+
+  # --------------------------------------------------------------------------
+  # Kafka
+  #
+  # Two listeners:
+  #   PLAINTEXT://kafka:29092   — internal container-to-container
+  #   PLAINTEXT_HOST://localhost:9092 — host machine access
+  # --------------------------------------------------------------------------
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: vaani-kafka
+    restart: unless-stopped
+    depends_on:
+      - zookeeper
+    ports:
+      - "9092:9092"      # host access for local development tools
+    environment:
+      KAFKA_BROKER_ID: 1
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+
+      KAFKA_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_NUM_PARTITIONS: 3
+      KAFKA_DEFAULT_REPLICATION_FACTOR: 1
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+
+      # Retention
+      KAFKA_LOG_RETENTION_HOURS: 24
+      KAFKA_LOG_SEGMENT_BYTES: 1073741824  # 1 GiB
+
+      KAFKA_LOG4J_ROOT_LOGLEVEL: WARN
+      KAFKA_TOOLS_LOG4J_LOGLEVEL: ERROR
+    volumes:
+      - kafka-data:/var/lib/kafka/data
+    healthcheck:
+      test: |
+        kafka-broker-api-versions --bootstrap-server localhost:9092
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - vaani-net
+
+  # --------------------------------------------------------------------------
+  # Kafka UI (optional — comment out if not needed)
+  # Access at http://localhost:8080
+  # --------------------------------------------------------------------------
+  kafka-ui:
+    image: provectuslabs/kafka-ui:latest
+    container_name: vaani-kafka-ui
+    restart: unless-stopped
+    depends_on:
+      kafka:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+    environment:
+      KAFKA_CLUSTERS_0_NAME: vaani-local
+      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
+      KAFKA_CLUSTERS_0_ZOOKEEPER: zookeeper:2181
+    networks:
+      - vaani-net
+
+volumes:
+  zookeeper-data:
+  zookeeper-log:
+  kafka-data:
+
+networks:
+  vaani-net:
+    driver: bridge
