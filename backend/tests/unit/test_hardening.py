@@ -31,16 +31,35 @@ def client() -> TestClient:
 class TestSecurityHeaders:
     """Test SecurityHeadersMiddleware behavior."""
 
-    def test_security_headers_present_on_success(self, client: TestClient) -> None:
+    def test_security_headers_present_in_development(self, client: TestClient) -> None:
         res = client.get("/api/v1/health/live")
         assert res.status_code == 200
         assert res.headers.get("X-Content-Type-Options") == "nosniff"
         assert res.headers.get("X-Frame-Options") == "DENY"
         assert res.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
-        assert "default-src 'none'" in res.headers.get("Content-Security-Policy", "")
+        csp = res.headers.get("Content-Security-Policy", "")
+        assert "default-src 'self'" in csp
+        assert "https://cdn.jsdelivr.net" in csp
+        assert "https://fastapi.tiangolo.com" in csp
+        assert "'unsafe-inline'" in csp
+        assert "frame-ancestors 'none'" in csp
         assert res.headers.get("X-XSS-Protection") == "0"
         # HSTS should be absent by default in dev
         assert "Strict-Transport-Security" not in res.headers
+
+    def test_security_headers_in_production(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("APP_ENV", "production")
+        app = create_app()
+        with TestClient(app) as prod_client:
+            res = prod_client.get("/api/v1/health/live")
+            assert res.status_code == 200
+            assert res.headers.get("X-Content-Type-Options") == "nosniff"
+            assert res.headers.get("X-Frame-Options") == "DENY"
+            assert res.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
+            assert res.headers.get("Content-Security-Policy") == (
+                "default-src 'none'; frame-ancestors 'none'"
+            )
+            assert res.headers.get("X-XSS-Protection") == "0"
 
     def test_hsts_header_when_enabled(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv("ENABLE_HSTS", "true")
@@ -49,6 +68,31 @@ class TestSecurityHeaders:
             res = hsts_client.get("/api/v1/health/live")
             assert res.status_code == 200
             assert "max-age=31536000" in res.headers.get("Strict-Transport-Security", "")
+
+    def test_docs_and_redoc_endpoints_render_with_dev_csp(self, client: TestClient) -> None:
+        # 1. OpenAPI JSON specification
+        openapi_res = client.get("/api/v1/openapi.json")
+        assert openapi_res.status_code == 200
+        schema = openapi_res.json()
+        assert "openapi" in schema
+        assert "paths" in schema
+
+        # 2. Swagger UI HTML
+        docs_res = client.get("/api/v1/docs")
+        assert docs_res.status_code == 200
+        assert "swagger-ui" in docs_res.text
+        assert "SwaggerUIBundle" in docs_res.text
+        docs_csp = docs_res.headers.get("Content-Security-Policy", "")
+        assert "https://cdn.jsdelivr.net" in docs_csp
+        assert "'unsafe-inline'" in docs_csp
+
+        # 3. ReDoc HTML
+        redoc_res = client.get("/api/v1/redoc")
+        assert redoc_res.status_code == 200
+        assert "redoc" in redoc_res.text
+        redoc_csp = redoc_res.headers.get("Content-Security-Policy", "")
+        assert "https://cdn.jsdelivr.net" in redoc_csp
+        assert "worker-src 'self' blob:" in redoc_csp
 
 
 class TestRequestSizeLimiting:

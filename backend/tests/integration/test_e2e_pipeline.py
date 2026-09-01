@@ -307,7 +307,8 @@ class TestE2ESecurityHardeningAndDegradation:
         assert res.headers.get("X-Content-Type-Options") == "nosniff"
         assert res.headers.get("X-Frame-Options") == "DENY"
         assert res.headers.get("Referrer-Policy") == "strict-origin-when-cross-origin"
-        assert "default-src 'none'" in res.headers.get("Content-Security-Policy", "")
+        assert "frame-ancestors 'none'" in res.headers.get("Content-Security-Policy", "")
+        assert "default-src" in res.headers.get("Content-Security-Policy", "")
 
         # Latency Profiling headers
         assert "X-Response-Time" in res.headers

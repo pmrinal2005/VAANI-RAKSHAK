@@ -12,8 +12,9 @@ Phase 9 equips the VAANI-RAKSHAK R2 backend with production-grade defense-in-dep
 Every HTTP response, including error responses, is decorated with standard defense-in-depth headers:
 - `X-Content-Type-Options: nosniff` (prevents MIME sniffing)
 - `X-Frame-Options: DENY` (clickjacking protection)
-- `Referrer-Policy: strict-origin-when-cross-origin`
-- `Content-Security-Policy: default-src 'none'; frame-ancestors 'none'`
+- `Content-Security-Policy`: Environment-aware defense-in-depth policy:
+  - **Development (`APP_ENV=development`):** Permits necessary CDN assets, Google Fonts, and inline scripts/workers for FastAPI Swagger UI (`/docs`) and ReDoc (`/redoc`).
+  - **Production (`APP_ENV=production`):** Highly restrictive API policy (`default-src 'none'; frame-ancestors 'none'`).
 - `X-XSS-Protection: 0` (modern standard disables legacy buggy reflective XSS filters)
 - `Strict-Transport-Security: max-age=31536000; includeSubDomains` (enabled when `ENABLE_HSTS=true` behind HTTPS)
 

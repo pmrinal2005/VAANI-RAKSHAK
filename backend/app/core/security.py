@@ -16,6 +16,23 @@ from app.core.config import Settings, get_settings
 logger = structlog.get_logger(__name__)
 
 
+# Content-Security-Policy directives
+# Production: Highly restrictive policy for pure JSON/WebSocket APIs
+PROD_CSP = "default-src 'none'; frame-ancestors 'none'"
+
+# Development: Permits resources required by FastAPI's interactive Swagger UI and ReDoc
+DEV_CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+    "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net https://fonts.googleapis.com; "
+    "img-src 'self' data: https://fastapi.tiangolo.com https://cdn.jsdelivr.net; "
+    "font-src 'self' https://fonts.gstatic.com https://cdn.jsdelivr.net data:; "
+    "connect-src 'self'; "
+    "worker-src 'self' blob:; "
+    "frame-ancestors 'none'"
+)
+
+
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
     Applies standard enterprise security headers to all HTTP responses,
@@ -36,7 +53,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'none'; frame-ancestors 'none'"
+            DEV_CSP if self.settings.is_development else PROD_CSP
         )
         response.headers["X-XSS-Protection"] = "0"  # Modern standard disables legacy buggy filter
 
