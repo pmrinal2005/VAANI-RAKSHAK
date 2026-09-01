@@ -51,3 +51,5 @@ colab_src/__pycache__/
 public/models/*.pkl
 public/models/*.log
 public/models/*.zip
+
+.vite/
