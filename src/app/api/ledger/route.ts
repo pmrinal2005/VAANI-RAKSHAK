@@ -5,6 +5,8 @@ import { ledgerBlocks } from "@/db/schema";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  // On-device / client-storage mode: the tamper-evident ledger lives in the browser.
+  if (!db) return Response.json({ blocks: [] });
   const rows = await db.select().from(ledgerBlocks).orderBy(asc(ledgerBlocks.blockIndex));
   return Response.json({ blocks: rows });
 }
@@ -32,6 +34,9 @@ export async function POST(request: Request) {
   ) {
     return Response.json({ error: "Invalid ledger block" }, { status: 400 });
   }
+
+  // On-device / client-storage mode: acknowledge without persisting server-side.
+  if (!db) return Response.json({ block: null, persisted: false }, { status: 202 });
 
   const [row] = await db
     .insert(ledgerBlocks)

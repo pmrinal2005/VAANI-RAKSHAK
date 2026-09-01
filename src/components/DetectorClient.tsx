@@ -2,6 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { assess } from "@/lib/detectionEngine";
+import { runOnnxDetection, type OnnxResult } from "@/lib/onnxDetector";
 import { decodeToMono, extractFeatures } from "@/lib/audioFeatures";
 import { synthDemo, encodeWav, type DemoKind } from "@/lib/demoSynth";
 import { anchorRiskAssessment } from "@/lib/ledger";
@@ -42,6 +43,8 @@ export function DetectorClient() {
   const [samples, setSamples] = useState<Float32Array | null>(null);
   const [features, setFeatures] = useState<AudioFeatures | null>(null);
   const [result, setResult] = useState<RiskAssessment | null>(null);
+  const [onnx, setOnnx] = useState<OnnxResult | null>(null);
+  const [onnxBusy, setOnnxBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -66,9 +69,19 @@ export function DetectorClient() {
       setBusy(true);
       setError(null);
       setAnchored(false);
+      setOnnx(null);
+      setOnnxBusy(true);
+
       try {
         const feats = extractFeatures(wav, sr);
         setFeatures(feats);
+
+        // Real trained-model inference (onnxruntime-web) is the PRIMARY verdict.
+        // It resamples/normalizes internally to match training. If the models
+        // can't load, assess() falls back to the heuristic cascade.
+        const onnxRes = await runOnnxDetection(wav, sr);
+        setOnnx(onnxRes);
+        setOnnxBusy(false);
 
         const speaker: SpeakerCheck = enrolled
           ? (() => {
@@ -94,7 +107,20 @@ export function DetectorClient() {
           feats,
           { ...ctx, claimedSpeaker: enrolled?.name ?? ctx.claimedSpeaker },
           speaker,
-          { forceTier2, language }
+          {
+            forceTier2,
+            language,
+            onnx: onnxRes.available
+              ? {
+                  available: true,
+                  probFake: onnxRes.probFake,
+                  cmScore: onnxRes.cmScore,
+                  threshold: onnxRes.threshold,
+                  cmLatencyMs: onnxRes.cmLatencyMs,
+                  fusionLatencyMs: onnxRes.fusionLatencyMs,
+                }
+              : null,
+          }
         );
         setResult(r);
         void fetch("/api/detections", {
@@ -120,6 +146,7 @@ export function DetectorClient() {
         setError(e instanceof Error ? e.message : String(e));
       } finally {
         setBusy(false);
+        setOnnxBusy(false);
       }
     },
     [ctx, enrolled, forceTier2, language]
@@ -384,6 +411,71 @@ export function DetectorClient() {
               Load a demo profile or upload a clip to run the full detection cascade. Try{" "}
               <b className="text-danger">Cloned</b> to see a CRITICAL escalation.
             </p>
+          </div>
+        )}
+
+        {(onnxBusy || onnx) && (
+          <div className="card p-5">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="text-sm font-semibold">
+                🧠 Trained model — primary verdict (real ONNX inference)
+              </h3>
+              <span className="text-[11px] uppercase tracking-wide text-white/35">
+                aasist_lite.onnx · fusion_lgbm.onnx
+              </span>
+            </div>
+            {onnxBusy && !onnx && (
+              <p className="text-sm text-white/55">
+                <Sparkles className="mr-1 inline h-4 w-4 animate-pulse text-saffron" />
+                Loading ONNX models &amp; running in-browser inference…
+              </p>
+            )}
+            {onnx && onnx.available && (
+              <div className="space-y-3">
+                <div className="flex flex-wrap items-center gap-3">
+                  <span
+                    className={`rounded-full px-3 py-1 text-sm font-bold ${
+                      onnx.isFake
+                        ? "bg-danger/20 text-danger"
+                        : "bg-safe/20 text-safe"
+                    }`}
+                  >
+                    {onnx.isFake ? "SPOOF / CLONE" : "BONA-FIDE"}
+                  </span>
+                  <span className="text-sm text-white/70">
+                    P(spoof) = <b>{(onnx.probFake * 100).toFixed(2)}%</b>
+                  </span>
+                  <span className="text-xs text-white/40">
+                    Tier-1 cm_score {onnx.cmScore.toFixed(3)} · ⏱ {onnx.latencyMs} ms
+                  </span>
+                </div>
+                <div className="h-2 overflow-hidden rounded-full bg-white/10">
+                  <div
+                    className="h-full rounded-full"
+                    style={{
+                      width: `${onnx.probFake * 100}%`,
+                      background:
+                        onnx.probFake > 0.6 ? "#ef4444" : onnx.probFake > 0.35 ? "#f59e0b" : "#22c55e",
+                    }}
+                  />
+                </div>
+                <p className="text-xs text-white/45">
+                  Decision threshold {onnx.threshold.toFixed(2)}
+                  {!onnx.thresholdCalibrated && (
+                    <span className="ml-1 text-warn">
+                      (uncalibrated — argmax fallback; model trained on a synthetic-heavy set,
+                      treat as indicative)
+                    </span>
+                  )}
+                </p>
+              </div>
+            )}
+            {onnx && !onnx.available && (
+              <p className="text-xs text-warn">
+                Trained-model inference unavailable ({onnx.error}). Falling back to the heuristic
+                cascade below.
+              </p>
+            )}
           </div>
         )}
 

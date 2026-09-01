@@ -5,6 +5,8 @@ import { detections } from "@/db/schema";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  // On-device / client-storage mode: no server DB — the client keeps its own history.
+  if (!db) return Response.json({ detections: [] });
   const rows = await db.select().from(detections).orderBy(desc(detections.createdAt)).limit(20);
   return Response.json({ detections: rows });
 }
@@ -25,6 +27,9 @@ export async function POST(request: Request) {
   if (!body.verdict || !body.band || typeof body.riskScore !== "number") {
     return Response.json({ error: "Invalid detection payload" }, { status: 400 });
   }
+
+  // On-device / client-storage mode: acknowledge without persisting server-side.
+  if (!db) return Response.json({ detection: null, persisted: false }, { status: 202 });
 
   const [row] = await db
     .insert(detections)

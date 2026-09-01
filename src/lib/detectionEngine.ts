@@ -20,6 +20,29 @@ import { routeLanguage } from "./indicRouter";
 const clamp01 = (x: number) => Math.max(0, Math.min(1, x));
 const sigmoid = (x: number) => 1 / (1 + Math.exp(-x));
 
+// Real trained-model signal (from onnxDetector). When present and available,
+// it is the authoritative acoustic verdict; the heuristic cascade below is only
+// a fallback for when the ONNX models can't load.
+export interface OnnxSignal {
+  available: boolean;
+  probFake: number; // fusion P(spoof) — the primary acoustic risk
+  cmScore: number; // Tier-1 AASIST-Lite sigmoid score
+  threshold?: number; // calibrated decision boundary (P(spoof) >= threshold ⇒ clone)
+  cmLatencyMs?: number;
+  fusionLatencyMs?: number;
+}
+
+// Map the model's raw P(spoof) onto a [0,1] risk whose midpoint (0.5) is the
+// model's CALIBRATED decision boundary, not a naive 0.5. Without this, a genuine
+// voice that scores e.g. P(spoof)=0.6 — which the calibrated model treats as REAL
+// (below a 0.83 threshold) — would still land in the "suspicious" gauge band and
+// be shown as a possible clone. Piecewise-linear, monotonic, boundary → 0.5.
+function calibratedRisk(probFake: number, threshold?: number): number {
+  const T = Math.min(0.95, Math.max(0.05, threshold ?? 0.5));
+  const p = clamp01(probFake);
+  return p < T ? 0.5 * (p / T) : 0.5 + 0.5 * ((p - T) / (1 - T));
+}
+
 function tier0(f: AudioFeatures): { score: number; reason: string; latencyMs: number } {
   const t = performance.now?.() ?? 0;
 
@@ -133,7 +156,12 @@ export async function assess(
   f: AudioFeatures,
   ctx: CallContext,
   speaker: SpeakerCheck,
-  opts?: { forceTier2?: boolean; strictThreshold?: number; language?: string | null }
+  opts?: {
+    forceTier2?: boolean;
+    strictThreshold?: number;
+    language?: string | null;
+    onnx?: OnnxSignal | null;
+  }
 ): Promise<RiskAssessment> {
   const t0start = performance.now?.() ?? 0;
   const lang = routeLanguage(f, opts?.language ?? null);
@@ -161,56 +189,99 @@ export async function assess(
     !ctx.knownContact;
   const t0Ambiguous = r0.score >= 0.18 && r0.score <= 0.75;
 
-  let r1: ReturnType<typeof tier1> | null = null;
-  if (t0Ambiguous || highStakes || r0.score > 0.75) {
-    r1 = tier1(f);
-    tiers.push({
-      tier: 1,
-      name: "Compact Neural CM (AASIST-L)",
-      invoked: true,
-      score: round(r1.score, 3),
-      latencyMs: r1.latencyMs,
-      reason: r1.reason,
-    });
-  } else {
-    tiers.push({
-      tier: 1,
-      name: "Compact Neural CM (AASIST-L)",
-      invoked: false,
-      score: 0,
-      latencyMs: 0,
-      reason: "Skipped — Tier-0 confident (early exit).",
-      earlyExit: true,
-    });
-  }
+  const onnx = opts?.onnx && opts.onnx.available ? opts.onnx : null;
 
-  let r2: ReturnType<typeof tier2> | null = null;
-  const disagree = r1 ? Math.abs(r0.score - r1.score) > 0.3 : false;
-  if (r1 && (disagree || highStakes)) {
-    r2 = tier2(f, lang, r1.score);
+  let cmScore: number;
+  let neuralDetail: string;
+  // Acoustic risk in [0,1] that drives the verdict. With the trained model this
+  // is its calibrated spoof probability; otherwise the heuristic fusion below.
+  let acousticFused: number;
+
+  if (onnx) {
+    // ---- PRIMARY PATH: real trained models are authoritative ----
     tiers.push({
-      tier: 2,
-      name: "Deep Multilingual SSL (IndicWav2Vec+AASIST3)",
+      tier: 1,
+      name: "AASIST-Lite neural CM (trained ONNX)",
       invoked: true,
-      score: round(r2.score, 3),
-      latencyMs: r2.latencyMs,
-      reason: r2.reason,
-    });
-  } else {
-    tiers.push({
-      tier: 2,
-      name: "Deep Multilingual SSL (IndicWav2Vec+AASIST3)",
-      invoked: false,
-      score: 0,
-      latencyMs: 0,
+      score: round(onnx.cmScore, 3),
+      latencyMs: round(onnx.cmLatencyMs ?? 0, 2),
       reason:
-        "Skipped — no tier disagreement & low-stakes context (median-case near-zero compute).",
-      earlyExit: true,
+        "Real compact AASIST-Lite countermeasure — in-browser ONNX inference over the 64×200 log-mel spectrogram.",
     });
-  }
+    tiers.push({
+      tier: 2,
+      name: "Multi-signal fusion (trained LightGBM ONNX)",
+      invoked: true,
+      score: round(onnx.probFake, 3),
+      latencyMs: round(onnx.fusionLatencyMs ?? 0, 2),
+      reason:
+        "Real LightGBM fusion over librosa DSP+prosody features + the neural score → calibrated spoof probability.",
+    });
+    cmScore = clamp01(onnx.probFake);
+    neuralDetail = `Trained AASIST-Lite (cm=${round(onnx.cmScore, 3)}) + LightGBM fusion → P(spoof)=${(
+      onnx.probFake * 100
+    ).toFixed(1)}% vs calibrated threshold ${(onnx.threshold ?? 0.5).toFixed(2)} (real ONNX inference).`;
+    // Anchor the verdict to the model's calibrated operating point so genuine
+    // voices below the threshold are not shown as clones.
+    acousticFused = calibratedRisk(onnx.probFake, onnx.threshold);
+  } else {
+    // ---- FALLBACK PATH: heuristic cascade (ONNX models unavailable) ----
+    let r1: ReturnType<typeof tier1> | null = null;
+    if (t0Ambiguous || highStakes || r0.score > 0.75) {
+      r1 = tier1(f);
+      tiers.push({
+        tier: 1,
+        name: "Compact Neural CM (AASIST-L proxy)",
+        invoked: true,
+        score: round(r1.score, 3),
+        latencyMs: r1.latencyMs,
+        reason: r1.reason,
+      });
+    } else {
+      tiers.push({
+        tier: 1,
+        name: "Compact Neural CM (AASIST-L proxy)",
+        invoked: false,
+        score: 0,
+        latencyMs: 0,
+        reason: "Skipped — Tier-0 confident (early exit).",
+        earlyExit: true,
+      });
+    }
 
-  const deepest = r2?.score ?? r1?.score ?? r0.score;
-  const cmScore = r1 && r2 && r1.score > 0.85 ? Math.max(r1.score, r2.score) : deepest;
+    let r2: ReturnType<typeof tier2> | null = null;
+    const disagree = r1 ? Math.abs(r0.score - r1.score) > 0.3 : false;
+    if (r1 && (disagree || highStakes)) {
+      r2 = tier2(f, lang, r1.score);
+      tiers.push({
+        tier: 2,
+        name: "Deep Multilingual SSL (IndicWav2Vec+AASIST3 proxy)",
+        invoked: true,
+        score: round(r2.score, 3),
+        latencyMs: r2.latencyMs,
+        reason: r2.reason,
+      });
+    } else {
+      tiers.push({
+        tier: 2,
+        name: "Deep Multilingual SSL (IndicWav2Vec+AASIST3 proxy)",
+        invoked: false,
+        score: 0,
+        latencyMs: 0,
+        reason:
+          "Skipped — no tier disagreement & low-stakes context (median-case near-zero compute).",
+        earlyExit: true,
+      });
+    }
+
+    const deepest = r2?.score ?? r1?.score ?? r0.score;
+    cmScore = r1 && r2 && r1.score > 0.85 ? Math.max(r1.score, r2.score) : deepest;
+    neuralDetail = (r2 ?? r1 ?? r0).reason;
+    const primary = Math.max(r0.score, cmScore);
+    const primaryFloor = primary > 0.6 ? 0.55 * primary + 0.45 * primary * primary : 0;
+    // weightedAvg is computed after votes below; provisional value overwritten.
+    acousticFused = primaryFloor;
+  }
 
   const votes: SignalVote[] = [
     {
@@ -222,23 +293,25 @@ export async function assess(
     },
     {
       id: "neural",
-      label: "Neural spectro-temporal CM",
+      label: onnx ? "Neural CM + fusion (trained ONNX)" : "Neural spectro-temporal CM",
       score: round(cmScore, 3),
       weight: 0.22,
-      detail: (r2 ?? r1 ?? r0).reason,
+      detail: neuralDetail,
     },
     prosodyVote(f),
     speakerVote(speaker),
   ];
 
   const ctxRisk = contextRisk(ctx);
-  const weightedAvg =
-    votes.reduce((acc, v) => acc + v.score * v.weight, 0) /
-    votes.reduce((acc, v) => acc + v.weight, 0);
-  const dspScore = r0.score;
-  const primary = Math.max(dspScore, cmScore);
-  const primaryFloor = primary > 0.6 ? 0.55 * primary + 0.45 * primary * primary : 0;
-  const acousticFused = clamp01(Math.max(weightedAvg, primaryFloor));
+  if (!onnx) {
+    // Heuristic acoustic fusion blends the vote panel with the artefact floor.
+    const weightedAvg =
+      votes.reduce((acc, v) => acc + v.score * v.weight, 0) /
+      votes.reduce((acc, v) => acc + v.weight, 0);
+    acousticFused = clamp01(Math.max(weightedAvg, acousticFused));
+  }
+  // Context (ANI reputation, known-contact, value, time-of-day) modulates the
+  // acoustic verdict by up to 18 pts and gates the out-of-band requirement.
   const fused = clamp01(0.82 * acousticFused + 0.18 * ctxRisk);
   const riskScore = Math.round(fused * 100);
 
@@ -258,7 +331,8 @@ export async function assess(
     lang,
     speaker,
     ctx,
-    shap
+    shap,
+    Boolean(onnx)
   );
   const totalLatencyMs = round(
     tiers.reduce((a, t) => a + t.latencyMs, 0) + ((performance.now?.() ?? 2) - t0start),
@@ -398,7 +472,8 @@ function buildExplanation(
   lang: LanguageRouting,
   spk: SpeakerCheck,
   ctx: CallContext,
-  shap: ShapContribution[]
+  shap: ShapContribution[],
+  modelDriven: boolean
 ): string {
   const top = shap
     .slice(0, 2)
@@ -432,7 +507,10 @@ function buildExplanation(
       : verdict === "SUSPICIOUS"
         ? `The voice carries mixed signals — some synthesis-consistent traits (notably ${top}) push the risk to ${risk}/100 (${band}).`
         : `The voice exhibits strong synthesis fingerprints (driven mainly by ${top}), giving a high impersonation risk of ${risk}/100 (${band}).`;
-  return `${head} ${langNote}${spkNote}${ctxNote}`;
+  const engineNote = modelDriven
+    ? " Verdict driven by the trained on-device models (AASIST-Lite + LightGBM fusion, real ONNX inference); call context adjusts the score and gates out-of-band verification."
+    : " Trained ONNX models were unavailable, so this verdict used the heuristic DSP cascade as a fallback.";
+  return `${head}${engineNote} ${langNote}${spkNote}${ctxNote}`;
 }
 
 function round(v: number, d = 2): number {
